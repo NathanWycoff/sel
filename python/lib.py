@@ -22,7 +22,7 @@ class NeuralNetwork(object):
     """
 
     #TODO: learn rate should be a full optmier.
-    def __init__(self, f, g, get_xt, R, H, P, Q, net_params, trainable_params, eprop_funcs = None, learn_rate = 0.001):
+    def __init__(self, f, g, get_xt, R, H, P, Q, net_params, trainable_params, eprop_funcs = None, learn_rate = 0.001, update_every = 1):
         self.f = f
         self.g = g
         self.get_xt = get_xt
@@ -34,6 +34,12 @@ class NeuralNetwork(object):
         self.trainable_params = trainable_params
         self.eprop_funcs = eprop_funcs
         self.learn_rate = learn_rate
+        self.update_every = update_every
+        self.n_runs = 0
+
+        self.grad_in = np.zeros([self.H, self.P])
+        self.grad_rec = np.zeros([self.H, self.H])
+        self.grad_out = np.zeros([self.Q, self.H])
 
         assert Q == 1
 
@@ -41,7 +47,7 @@ class NeuralNetwork(object):
         self.st1 = np.zeros([self.R, self.H])
         self.zt1 = f(self, self.st1)
 
-    def run(self, t_steps, ip, target = None, train = False, save_states = False):
+    def run(self, t_steps, ip, target = None, train = False, save_states = False, save_traces = False):
         """
         Run the simulation for the specified number of steps with input parameters given in the dictionary ip.
 
@@ -49,7 +55,6 @@ class NeuralNetwork(object):
 
         target - An indexible collection of length t_steps; gives the target at a given time point (1D for now)
         """
-
 
         if train:
             if target is None:
@@ -62,10 +67,10 @@ class NeuralNetwork(object):
             epst1_in = np.zeros([self.H, self.P, self.R, 1])
             filt_et = np.zeros([self.H, self.H])
             filt_et_in = np.zeros([self.H, self.P])
-            grad_in = np.zeros([self.H, self.P])
-            grad_rec = np.zeros([self.H, self.H])
-            grad_out = np.zeros([self.Q, self.H])
             dydout = np.zeros([self.Q,self.H])
+
+
+        self.n_runs += 1
 
         if target is not None:
             cost = 0
@@ -73,6 +78,12 @@ class NeuralNetwork(object):
         if save_states:
             S = np.zeros([self.R, self.H, t_steps])
             Z = np.zeros([self.H, t_steps])
+
+        if save_traces:
+            ET = np.zeros([self.H, self.H, t_steps])
+            ET_in = np.zeros([self.H, self.P, t_steps])
+            EPS = np.zeros([self.H, self.H, self.R, t_steps])
+            EPS_in = np.zeros([self.H, self.P, self.R, t_steps])
 
         ys = np.zeros([self.Q, t_steps])
         yt1 = np.zeros([self.Q,1])
@@ -114,7 +125,7 @@ class NeuralNetwork(object):
                 # The commented out line seems to be equivalent (and hence, more efficient), although less readable, as array multiplication with different dimensions is unintuitive.
                 #gradt_in = filt_et_in * Lt
                 gradt_in = np.diag(Lt) @ filt_et_in
-                grad_in += gradt_in
+                self.grad_in += gradt_in
 
                 # E-prop 1 for Recurrent connectivity.
                 #TODO: The tiling is highly inefficient, I'm sure we can figure out how to do it without it.
@@ -136,18 +147,24 @@ class NeuralNetwork(object):
                 # The commented out line seems to be equivalent (and hence, more efficient)
                 #gradt_rec = filt_et * Lt
                 gradt_rec = np.diag(Lt) @ filt_et
-                grad_rec += gradt_rec
+                self.grad_rec += gradt_rec
 
                 # Readout weights are easier.
                 assert self.Q == 1
                 delta = float(yt - target[ti]) 
                 dydout = self.net_params['kappa'] * dydout + zt
                 gradt_out = delta * dydout
-                grad_out += gradt_out
+                self.grad_out += gradt_out
 
                 # Update vars
                 epst1_in = epst_in
                 epst1 = epst
+
+                if save_traces:
+                    ET[:,:,ti] = et
+                    ET_in[:,:,ti] = et_in
+                    EPS[:,:,:,ti] = epst.reshape([self.H,self.H,self.R])
+                    EPS_in[:,:,:,ti] = epst_in.reshape([self.H,self.P,self.R])
 
             if save_states:
                 S[:,:,ti] = st
@@ -158,12 +175,15 @@ class NeuralNetwork(object):
             yt1 = yt
 
         # Just gradient descent for now, and just on recurrent connections.
-        if train:
+        if train and (self.n_runs % self.update_every == 0):
             # We choose to disallow self-connections, though it might be interesting to explore in the future.
-            grad_rec = grad_rec - np.diag(np.diag(grad_rec))
-            self.trainable_params['in'] = self.trainable_params['in'] - self.learn_rate * grad_in
-            self.trainable_params['rec'] = self.trainable_params['rec'] - self.learn_rate * grad_rec
-            self.trainable_params['out'] = self.trainable_params['out'] - self.learn_rate * grad_out
+            self.grad_rec = self.grad_rec - np.diag(np.diag(self.grad_rec))
+            self.trainable_params['in'] = self.trainable_params['in'] - self.learn_rate * self.grad_in
+            self.trainable_params['rec'] = self.trainable_params['rec'] - self.learn_rate * self.grad_rec
+            self.trainable_params['out'] = self.trainable_params['out'] - self.learn_rate * self.grad_out
+            self.grad_in = np.zeros([self.H, self.P])
+            self.grad_rec = np.zeros([self.H, self.H])
+            self.grad_out = np.zeros([self.Q, self.H])
 
         self.st1 = st1
         self.zt1 = zt1
@@ -174,10 +194,13 @@ class NeuralNetwork(object):
         if save_states:
             ret['S'] = S
             ret['Z'] = Z
-        if train:
-            ret['grad_rec'] = grad_rec
         if target is not None:
             ret['cost'] = cost
+        if save_traces:
+            ret['ET'] = ET
+            ret['ET_in'] = ET_in
+            ret['EPS'] = EPS
+            ret['EPS_in'] = EPS_in
 
         return ret
 

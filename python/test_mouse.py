@@ -1,31 +1,36 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-#  python/test_eprop1_lif.py Author "Nathan Wycoff <nathanbrwycoff@gmail.com>" Date 01.12.2020
-
-## Test learning with e-prop 1 on a simple problem with LIF neurons.
+#  python/mouse_adapt_bd.py Author "Nathan Wycoff <nathanbrwycoff@gmail.com>" Date 12.14.2019
 
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 exec(open("python/lib.py").read())
+exec(open("python/mouse_lib.py").read())
 
-np.random.seed(1234)
+np.random.seed(123)
 
-H = 5
-P = 3
-Q = 1
+# For the  mouse problem, groups of neurons fire to indicate the task parameters. We specify their properties here.
+signal_duration = 1.0
+spikes_per_signal = 4
+neur_per_group = 1
+
 R = 2
-mult = 100. / np.sqrt(H)
+H = 100
+P = 4*neur_per_group
+Q = 1
+mult = 200. / np.sqrt(H)
+cue_time = 10.0
 
 thresh = 1.0
 t_eps = 0.01
 tau_m = 0.2
 tau_o = tau_m
-tau_a = tau_m
+tau_a = 2.
 alpha = np.exp(-t_eps/tau_m)
 kappa = np.exp(-t_eps/tau_o)
 rho = np.exp(-t_eps/tau_a)
-beta = 0.03
+beta = 0.07
 
 THETA_in = mult * np.abs(np.random.normal(size=[H,P]) * t_eps)
 THETA_rec = mult * np.random.normal(size=[H,H]) * t_eps
@@ -33,34 +38,14 @@ THETA_rec -= np.diag(np.diag(THETA_rec)) # No recurrent connectivity.
 THETA_out = np.random.normal(size=[Q,H])
 
 t_steps = 2000
+t_end = t_steps * t_eps
 gamma = 0.3 # Called gamma in the article
-learn_rate = 5e-6
-epochs = 100
-
-# Make up some input spikes.
-seq = np.linspace(t_eps * 10, t_eps * t_steps, t_steps / 10)
-#spikes1 = seq[np.floor(seq) % 2 == 0]
-#spikes2 = seq[np.floor(seq) % 2 != 0]
-spikes1 = seq[seq <= 10.]
-spikes2 = seq[seq > 10.]
-# Add a random noise channel
-n_spikes = len(spikes1)
-spikes3 = np.sort(np.random.choice(t_steps, n_spikes, replace = False) * t_eps)
-in_spikes = [[] for _ in range(t_steps+1)]
-for spike in spikes1:
-    in_spikes[int(spike/t_eps)] = [0]
-for spike in spikes2:
-    in_spikes[int(spike/t_eps)] = [1]
-for spike in spikes3:
-    in_spikes[int(spike/t_eps)] = [2]
-
-# Create a random objective
-#target = np.ones([t_steps]) - 2 * np.array(np.floor(np.linspace(0,t_steps*t_eps, t_steps)) % 2 == 0).astype(np.float64)
-target = np.ones([t_steps]) - 2 * np.array(np.linspace(0,t_steps*t_eps,t_steps) <= 10).astype(np.float64)
+mb_size = 20
+learn_rate = 1e-8 / mb_size
+epochs = 3600
 
 nn_params = {'thresh' : thresh, 'alpha' : alpha, 'kappa' : kappa, 'beta' : beta,  'rho' : rho,  't_eps' : t_eps, 'gamma' : gamma}
 trainable_params = {'in' : THETA_in, 'rec' : THETA_rec, 'out' : THETA_out}
-in_params = {'in_spikes' : in_spikes}
 
 def L(nn, yt, target):
     return (nn.trainable_params['out'] * (yt - target)).flatten()
@@ -80,6 +65,7 @@ def d_st_d_tp(nn, st1, zt1):
 # Gives the jacobian of the state vector at time t wrt the state vector at time t-1.
 # Should return a tensor of shape RxRxH, element i,j,k represents the derivative of neuron state dimension i at time t wrt neuron state dimension j at time t-1 for neuron k.
 def D(nn, st, st1):
+    #TODO: It seems like we're not dividing the whole expression here, is that desired?
     hs = 1. - np.abs((st[0,:] - nn.net_params['thresh']) / nn.net_params['thresh'])
     hs *= nn.net_params['gamma'] 
     hs *= (hs > 0).astype(np.float)
@@ -140,14 +126,24 @@ def get_xt(nn, ip, ti):
     xt[ip['in_spikes'][ti]] = 1
     return xt
 
-snn = NeuralNetwork(f = f, g = g, get_xt = get_xt, R = R, H = H, P = P, Q = Q, net_params = nn_params, trainable_params = trainable_params, eprop_funcs = eprop_funcs, learn_rate = learn_rate)
+snn = NeuralNetwork(f = f, g = g, get_xt = get_xt, R = R, H = H, P = P, Q = Q, net_params = nn_params, trainable_params = trainable_params, eprop_funcs = eprop_funcs, learn_rate = learn_rate, update_every = mb_size)
 
-ret = snn.run(t_steps = t_steps, ip = in_params, target = None, train = False, save_states = True)
+costs = np.zeros(epochs)
+decision = np.zeros(epochs, dtype = np.bool)
+dirs = np.zeros(epochs, dtype = np.bool)
 
-costs = np.empty([epochs])
 for epoch in tqdm(range(epochs)):
-    ret = snn.run(t_steps = t_steps, ip = in_params, target = target, train = True, save_states = True)
+
+    ### Sample a new problem!
+    coinflip, in_spikes, target = make_mouse_prob(t_eps, t_steps, signal_duration, spikes_per_signal, neur_per_group, cue_time = cue_time)
+    dirs[epoch] = coinflip
+
+    in_params = {'in_spikes' : in_spikes}
+
+    ret = snn.run(t_steps = t_steps, ip = in_params, target = target, train = True, save_states = True, save_traces = True)
+
     costs[epoch] = ret['cost']
+    decision[epoch] = (np.mean(ret['y'][:,int(cue_time / t_eps):]) > 0)
 
 y = ret['y']
 S = ret['S']
@@ -156,17 +152,28 @@ fig = plt.figure(figsize=[8,8])
 plt.subplot(2,2,1)
 plt.plot(S[0,:,:].T)
 plt.title("Potential")
+#plt.subplot(2,2,2)
+#plt.plot(S[1,:,:].T)
+#plt.title("Adaptive Threshold")
 plt.subplot(2,2,2)
-plt.plot(S[1,:,:].T)
-plt.title("Adaptive Threshold")
+n_plot = 1000
+toplot = np.random.choice(H*H,n_plot,replace = False)
+plt.plot(ret['EPS'][:,:,1,:].reshape([H*H,t_steps]).T[:,toplot])
+plt.title("Slow ET Componenet.")
 plt.subplot(2,2,3)
 plt.plot(y.flatten())
 plt.title("Output")
 plt.subplot(2,2,4)
 plt.plot(np.log10(costs))
 plt.title("Costs")
-plt.savefig("temp.pdf")
+plt.savefig("temp.png")
 plt.close()
 
-print("Col Norms: ")
-print(np.sqrt(np.sum(np.square(snn.trainable_params['in']), axis = 0)))
+print("Accuracy: %f"%(np.mean(decision==dirs)))
+
+N = 100
+ma = np.convolve(costs, np.ones((N,))/N, mode='valid')
+fig = plt.figure()
+plt.plot(ma)
+plt.savefig("costs_ma.pdf")
+plt.close()
