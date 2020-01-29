@@ -34,8 +34,8 @@ THETA_out = np.random.normal(size=[Q,H])
 
 t_steps = 2000
 gamma = 0.3 # Called gamma in the article
-learn_rate = 5e-6
-epochs = 100
+learn_rate = 1e-1
+epochs = 10
 
 # Make up some input spikes.
 seq = np.linspace(t_eps * 10, t_eps * t_steps, t_steps / 10)
@@ -62,8 +62,16 @@ nn_params = {'thresh' : thresh, 'alpha' : alpha, 'kappa' : kappa, 'beta' : beta,
 trainable_params = {'in' : THETA_in, 'rec' : THETA_rec, 'out' : THETA_out}
 in_params = {'in_spikes' : in_spikes}
 
-def L(nn, yt, target):
-    return (nn.trainable_params['out'] * (yt - target)).flatten()
+def dEdy(nn, yt, target_t):
+
+    if np.isnan(target_t):
+        return 0.
+
+    return (yt - target_t).flatten()
+
+def L(nn, yt, target_t):
+    d = nn.eprop_funcs['dEdy'](nn, yt, target_t)
+    return (d * nn.trainable_params['out']).flatten()
 
 # Give the jacobian of the state vector with respect to the trainable parameters.
 # TODO: Think harder about the timing for this: we have st1 here but st in lib.py
@@ -102,7 +110,7 @@ def dzds(nn, st):
     ret = ret.T
     return ret
 
-eprop_funcs = {'L' : L, 'd_st_d_tp' : d_st_d_tp, 'D' : D, 'dzds' : dzds}
+eprop_funcs = {'L' : L, 'd_st_d_tp' : d_st_d_tp, 'D' : D, 'dzds' : dzds, "dEdy" : dEdy}
 
 def f(nn, st):
     beta = nn.net_params['beta']
@@ -140,7 +148,8 @@ def get_xt(nn, ip, ti):
     xt[ip['in_spikes'][ti]] = 1
     return xt
 
-snn = NeuralNetwork(f = f, g = g, get_xt = get_xt, R = R, H = H, P = P, Q = Q, net_params = nn_params, trainable_params = trainable_params, eprop_funcs = eprop_funcs, learn_rate = learn_rate)
+opt = Adam(learn_rate = learn_rate)
+snn = NeuralNetwork(f = f, g = g, get_xt = get_xt, R = R, H = H, P = P, Q = Q, net_params = nn_params, trainable_params = trainable_params, optimizer = opt, eprop_funcs = eprop_funcs)
 
 ret = snn.run(t_steps = t_steps, ip = in_params, target = None, train = False, save_states = True)
 

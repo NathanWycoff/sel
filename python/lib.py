@@ -2,6 +2,10 @@
 # -*- coding: utf-8 -*-
 #  python/lib.py Author "Nathan Wycoff <nathanbrwycoff@gmail.com>" Date 01.12.2020
 
+exec(open("./python/optim_lib.py").read())
+
+mse = lambda x,y: np.sum(np.square(x-y))
+
 class NeuralNetwork(object):
     """
     A very general neural network as defined in Bellec et al. 
@@ -18,11 +22,12 @@ class NeuralNetwork(object):
     net_params - Additional, fixed network parameters, such as membrane time constants. Should be a dictionary of arbitrary objects.
     trainable_params - Parameters to be learned via eprop, such as connection weights. Should be a dictionary of np.arrays.
     eprop_funcs - A dictionary of functions needed to do eprop.
+    costfunc - A scalar function; it's first argument is the prediction and second the truth.
 
     """
 
     #TODO: learn rate should be a full optmier.
-    def __init__(self, f, g, get_xt, R, H, P, Q, net_params, trainable_params, eprop_funcs = None, learn_rate = 0.001, update_every = 1):
+    def __init__(self, f, g, get_xt, R, H, P, Q, net_params, trainable_params, optimizer, eprop_funcs = None, update_every = 1, costfunc = mse):
         self.f = f
         self.g = g
         self.get_xt = get_xt
@@ -33,9 +38,10 @@ class NeuralNetwork(object):
         self.net_params = net_params
         self.trainable_params = trainable_params
         self.eprop_funcs = eprop_funcs
-        self.learn_rate = learn_rate
+        self.optimizer = optimizer
         self.update_every = update_every
         self.n_runs = 0
+        self.costfunc = costfunc
 
         self.grad_in = np.zeros([self.H, self.P])
         self.grad_rec = np.zeros([self.H, self.H])
@@ -43,6 +49,14 @@ class NeuralNetwork(object):
 
         assert Q == 1
 
+        # Initialize state to zeros.
+        self.st1 = np.zeros([self.R, self.H])
+        self.zt1 = f(self, self.st1)
+
+    def reset_states(self):
+        """
+        Reset hidden states.
+        """
         # Initialize state to zeros.
         self.st1 = np.zeros([self.R, self.H])
         self.zt1 = f(self, self.st1)
@@ -98,8 +112,13 @@ class NeuralNetwork(object):
             yt = self.net_params['kappa'] * yt1 + self.trainable_params['out'] @ zt
             ys[:,ti] = yt
 
-            if target is not None:
-                cost += np.sum(np.square(yt - target[ti]))
+            if (target is not None) and (not np.isnan(target[ti])):
+                nc = self.costfunc(yt, target[ti])
+                cost += nc
+                if np.isnan(nc):
+                    print("asdf")
+                    print(nc)
+                    break
 
             if train:
 
@@ -132,7 +151,8 @@ class NeuralNetwork(object):
                 Dt = self.eprop_funcs['D'](self, st, st1)
                 Dts = np.expand_dims(Dt, 1)
                 Dts = np.tile(Dts, (1,self.H,1,1))
-                dsdt = self.eprop_funcs['d_st_d_tp'](self, st, zt)
+                #TODO: Make sure it is indeed st and not st1 in the next line.
+                dsdt = self.eprop_funcs['d_st_d_tp'](self, st, zt1)
                 epst = Dts @ epst1 + dsdt
                 dzds = self.eprop_funcs['dzds'](self, st)
                 dzds = np.expand_dims(dzds, 1)
@@ -151,7 +171,7 @@ class NeuralNetwork(object):
 
                 # Readout weights are easier.
                 assert self.Q == 1
-                delta = float(yt - target[ti]) 
+                delta = self.eprop_funcs['dEdy'](self, yt, target[ti])
                 dydout = self.net_params['kappa'] * dydout + zt
                 gradt_out = delta * dydout
                 self.grad_out += gradt_out
@@ -178,9 +198,12 @@ class NeuralNetwork(object):
         if train and (self.n_runs % self.update_every == 0):
             # We choose to disallow self-connections, though it might be interesting to explore in the future.
             self.grad_rec = self.grad_rec - np.diag(np.diag(self.grad_rec))
-            self.trainable_params['in'] = self.trainable_params['in'] - self.learn_rate * self.grad_in
-            self.trainable_params['rec'] = self.trainable_params['rec'] - self.learn_rate * self.grad_rec
-            self.trainable_params['out'] = self.trainable_params['out'] - self.learn_rate * self.grad_out
+            grads = [self.grad_in, self.grad_rec, self.grad_out]
+            self.trainable_params = self.optimizer.apply_gradients(self.trainable_params, grads)
+            #self.trainable_params['in'] = self.trainable_params['in'] - self.learn_rate * self.grad_in
+            #self.trainable_params['rec'] = self.trainable_params['rec'] - self.learn_rate * self.grad_rec
+            #self.trainable_params['out'] = self.trainable_params['out'] - self.learn_rate * self.grad_out
+            self.last_grads = [self.grad_in, self.grad_rec, self.grad_out]
             self.grad_in = np.zeros([self.H, self.P])
             self.grad_rec = np.zeros([self.H, self.H])
             self.grad_out = np.zeros([self.Q, self.H])
@@ -218,3 +241,44 @@ class LifNeuralNetwork(SpikingNeuralNetwork):
 
     """
     pass
+
+def plot_allinone(y, inlist, hiddenlist, costs, path = "allinone.pdf"):
+    """
+    y is a matrix giving one output in each row over time (time is represented by columns)
+    inlist a list of lists. Each sublist represents a "group" of input neurons, which will have the same color. Each sublist should contain np.arrays giving neuron firing times.
+    inlist A list of arrays, giving the firing times of each neuron
+    """
+    fig = plt.figure(figsize=[8,8])
+
+    plt.subplot(2,2,1)
+    plt.plot(y.T)
+    plt.title("Output")
+
+    G = len(inlist)
+    color = plt.cm.rainbow(np.linspace(0,1,G))
+    plt.subplot(2,2,2)
+    nplotted = 0
+
+    for g in range(G):
+        for gi in range(len(inlist[g])):
+            nplotted += 1
+            plt.eventplot(inlist[g][gi], color=color[g], linelengths = 0.5, lineoffsets=nplotted)
+
+    plt.title("Input Spikes")
+
+    G = len(hiddenlist)
+    plt.subplot(2,2,3)
+    nplotted = 0
+
+    for g in range(G):
+        nplotted += 1
+        plt.eventplot(hiddenlist[g], color='blue', linelengths = 0.5, lineoffsets=nplotted)
+
+    plt.title("Hidden Spikes")
+
+    plt.subplot(2,2,4)
+    plt.title("Cost:")
+    plt.plot(costs)
+
+    plt.savefig(path)
+    plt.close()
