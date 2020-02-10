@@ -52,6 +52,7 @@ class NeuralNetwork(object):
         # Initialize state to zeros.
         self.st1 = np.zeros([self.R, self.H])
         self.zt1 = f(self, self.st1)
+        self.xt1 = np.zeros([self.P])
 
     def reset_states(self):
         """
@@ -60,6 +61,7 @@ class NeuralNetwork(object):
         # Initialize state to zeros.
         self.st1 = np.zeros([self.R, self.H])
         self.zt1 = f(self, self.st1)
+        self.net_params['rc'] = np.zeros(H).astype(np.int)
 
     def run(self, t_steps, ip, target = None, train = False, save_states = False, save_traces = False):
         """
@@ -104,9 +106,10 @@ class NeuralNetwork(object):
 
         st1 = self.st1
         zt1 = self.zt1
+        xt1 = self.xt1
         for ti in range(t_steps):
             xt = self.get_xt(self, ip, ti)
-            st = self.g(self, st1, zt1, xt)
+            st = self.g(self, st1, zt1, xt1)
             zt = self.f(self, st)
 
             yt = self.net_params['kappa'] * yt1 + self.trainable_params['out'] @ zt
@@ -115,10 +118,6 @@ class NeuralNetwork(object):
             if (target is not None) and (not np.isnan(target[ti])):
                 nc = self.costfunc(yt, target[ti])
                 cost += nc
-                if np.isnan(nc):
-                    print("asdf")
-                    print(nc)
-                    break
 
             if train:
 
@@ -129,9 +128,9 @@ class NeuralNetwork(object):
                 Dt = self.eprop_funcs['D'](self, st, st1)
                 Dts = np.expand_dims(Dt, 1)
                 Dts = np.tile(Dts, (1,self.P,1,1))
-                dsdt = self.eprop_funcs['d_st_d_tp'](self, st, xt)
+                dsdt = self.eprop_funcs['d_st_d_tp'](self, st, xt1)
                 epst_in = Dts @ epst1_in + dsdt
-                dzds = self.eprop_funcs['dzds'](self, st)
+                dzds = self.eprop_funcs['dzds'](self, st, zt)
                 dzds = np.expand_dims(dzds, 1)
                 dzds = np.expand_dims(dzds, 1)
                 dzds = np.tile(dzds, (1,self.P,1,1))
@@ -154,7 +153,7 @@ class NeuralNetwork(object):
                 #TODO: Make sure it is indeed st and not st1 in the next line.
                 dsdt = self.eprop_funcs['d_st_d_tp'](self, st, zt1)
                 epst = Dts @ epst1 + dsdt
-                dzds = self.eprop_funcs['dzds'](self, st)
+                dzds = self.eprop_funcs['dzds'](self, st, zt)
                 dzds = np.expand_dims(dzds, 1)
                 dzds = np.expand_dims(dzds, 1)
                 dzds = np.tile(dzds, (1,self.H,1,1))
@@ -193,6 +192,7 @@ class NeuralNetwork(object):
             st1 = st
             zt1 = zt
             yt1 = yt
+            xt1 = xt
 
         # Just gradient descent for now, and just on recurrent connections.
         if train and (self.n_runs % self.update_every == 0):

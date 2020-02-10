@@ -64,11 +64,11 @@ def make_mouse_prob(t_eps, n_signals, signal_duration, break_duration, cue_durat
     if len(major_times) > 0:
         major_spikes = np.concatenate([np.random.uniform(low = mt, high = mt + signal_duration, size = [spikes_per_signal, neur_per_group]) for mt in major_times], axis = 0)
     else:
-        major_spikes = np.array([]).reshape([0,10])
+        major_spikes = np.array([]).reshape([0,neur_per_group])
     if len(minor_times) > 0:
         minor_spikes = np.concatenate([np.random.uniform(low = mt, high = mt + signal_duration, size = [spikes_per_signal, neur_per_group]) for mt in minor_times], axis = 0)
     else:
-        minor_spikes = np.array([]).reshape([0,10])
+        minor_spikes = np.array([]).reshape([0,neur_per_group])
 
     if direction:
         left_spikes = major_spikes
@@ -78,13 +78,16 @@ def make_mouse_prob(t_eps, n_signals, signal_duration, break_duration, cue_durat
         left_spikes = minor_spikes
 
     # Sample cue time, randomly and uniformly between 500 and 1500 ms.
-    cue_time = np.random.uniform(low = 0.5, high = 1.5)
+    signal_time = n_signals * (break_duration + signal_duration)
+    cue_time = signal_time + np.random.uniform(low = 0.5, high = 1.5)
 
-    t_end = cue_time + cue_duration
+    t_end = cue_time + cue_duration + break_duration
     t_steps = int(np.ceil(t_end / t_eps))
 
     # Sample noise channel
-    n_noise_spikes = 0#int(t_end * spikes_per_signal)
+    #TODO: Expose the constant 4
+    n_noise_spikes = int(t_end / signal_duration * spikes_per_signal / 4)
+    #n_noise_spikes = 0
     noise_spikes = np.random.uniform(low = 0., high = t_end, size = [n_noise_spikes, neur_per_group])
 
     # Sample cue channel
@@ -93,7 +96,7 @@ def make_mouse_prob(t_eps, n_signals, signal_duration, break_duration, cue_durat
 
     # Convert to the format I've been using to do the actual simulation.
     inlist_flat = [item for sublist in inlist for item in sublist]
-    in_spikes = [[] for _ in range(t_steps+1)]
+    in_spikes = [[] for _ in range(t_steps)]
     for i, spikesi in enumerate(inlist_flat):
         for spike in spikesi:
             in_spikes[int(spike/t_eps)].append(i)
@@ -101,7 +104,7 @@ def make_mouse_prob(t_eps, n_signals, signal_duration, break_duration, cue_durat
     # Target is zero except for after the cue.
     target = np.repeat(np.nan,t_steps)
     if direction:
-        target[int(cue_time / t_eps):] = 1
+        target[int(cue_time / t_eps):int((cue_time+cue_duration)/t_eps)] = 1
     else:
-        target[int(cue_time / t_eps):] = 0
+        target[int(cue_time / t_eps):int((cue_time+cue_duration)/t_eps)] = 0
     return direction, inlist, in_spikes, target, t_steps, cue_time
