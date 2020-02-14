@@ -48,7 +48,7 @@
 #        target[int(cue_time / t_eps):] = 0
 #    return coinflip, inlist, in_spikes, target
 
-def make_mouse_prob(t_eps, n_signals, signal_duration, break_duration, cue_duration, spikes_per_signal, neur_per_group):
+def make_mouse_prob(t_eps, n_signals, signal_duration, break_duration, cue_duration, spikes_per_signal, neur_per_group, noise = True):
     flips = np.random.choice(2, n_signals, replace = True)
     direction = np.mean(flips) > 0.5
 
@@ -86,8 +86,10 @@ def make_mouse_prob(t_eps, n_signals, signal_duration, break_duration, cue_durat
 
     # Sample noise channel
     #TODO: Expose the constant 4
-    n_noise_spikes = int(t_end / signal_duration * spikes_per_signal / 4)
-    #n_noise_spikes = 0
+    if noise:
+        n_noise_spikes = int(t_end / signal_duration * spikes_per_signal / 4)
+    else:
+        n_noise_spikes = 0
     noise_spikes = np.random.uniform(low = 0., high = t_end, size = [n_noise_spikes, neur_per_group])
 
     # Sample cue channel
