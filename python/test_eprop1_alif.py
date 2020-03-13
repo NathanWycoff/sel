@@ -174,15 +174,15 @@ def get_xt(nn, ip, ti):
     xt[ip['in_spikes'][ti]] = 1
     return xt
 
-
 opt = Adam(learn_rate = learn_rate)
 #opt = GD(learn_rate = learn_rate)
-snn = NeuralNetwork(f = f, g = g, get_xt = get_xt, R = R, H = H, P = P, Q = Q, net_params = nn_params, trainable_params = trainable_params, optimizer = opt, eprop_funcs = eprop_funcs, costfunc = mse)
+snn = NeuralNetwork(f = f, g = g, R = R, H = H, P = P, Q = Q, net_params = nn_params, trainable_params = trainable_params, optimizer = opt, eprop_funcs = eprop_funcs, costfunc = mse)
 
 costs = np.zeros(epochs)
 
+in_params = {'in_spikes' : in_spikes}
+in_params['get_xt'] = get_xt
 for epoch in tqdm(range(epochs)):
-    in_params = {'in_spikes' : in_spikes}
 
     #TODO: Betterrrr
     snn.net_params['spikes'] = []
