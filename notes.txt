@@ -1,0 +1,1 @@
+# That INRC talk showed how neural nets can be destabalized, does Bayesian inferenec help with this?

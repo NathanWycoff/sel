@@ -68,6 +68,8 @@ class Adam(object):
         """
         params - A list or dictionary of parameters to update
         dirs - A list of descent directions to move along. This should be of the same length as params, and each entry should be of the same size as the corresponding params entry.
+
+        Returns that same list
         """
 
         # Deal with dictionaries.

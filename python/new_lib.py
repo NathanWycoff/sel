@@ -5,7 +5,6 @@
 exec(open("./python/optim_lib.py").read())
 
 mse = lambda x,y: np.sum(np.square(x-y))
-sigmoid = lambda x: 1. / (1. + np.exp(-x))
 
 def crossentropy(logodds, label):
     prob = sigmoid(logodds)
@@ -35,6 +34,7 @@ class NeuralNetwork(object):
 
     """
 
+    #TODO: learn rate should be a full optmier.
     def __init__(self, f, g, R, H, P, Q, net_params, trainable_params, optimizer, eprop_funcs = None, update_every = 1, costfunc = mse):
         self.f = f
         self.g = g
@@ -67,7 +67,7 @@ class NeuralNetwork(object):
         """
         # Initialize state to zeros.
         self.st1 = np.zeros([self.R, self.H])
-        self.zt1 = self.f(self, self.st1)
+        self.zt1 = f(self, self.st1)
         self.net_params['rc'] = np.zeros(H).astype(np.int)
 
     def run(self, t_steps, ip, target = None, train = False, save_states = False, save_traces = False):
@@ -114,7 +114,7 @@ class NeuralNetwork(object):
         zt1 = self.zt1
         xt1 = self.xt1
         for ti in range(t_steps):
-            xt = ip['get_xt'](self, ip, ti)
+            xt = self.ip['get_xt'](self, ip, ti)
             st = self.g(self, st1, zt1, xt1)
             zt = self.f(self, st)
 
@@ -129,13 +129,33 @@ class NeuralNetwork(object):
 
                 # TODO: There is much code reuse between these next few blocks: we should write a function. The logic is very similar as it is, but I think there's a smart way to simultaneously get rid of tiling and make the code more similar.
 
+                ### E-prop 1 for input connectivity.
+                ##TODO: The tiling is highly inefficient, I'm sure we can figure out how to do it without it.
+                #Dt = self.eprop_funcs['D'](self, st, st1)
+                #Dts = np.expand_dims(Dt, 1)
+                #Dts = np.tile(Dts, (1,self.P,1,1))
+                #dsdt = self.eprop_funcs['d_st_d_tp'](self, st, xt1)
+                #epst_in = Dts @ epst1_in + dsdt
+                #dzds = self.eprop_funcs['dzds'](self, st, zt)
+                #dzds = np.expand_dims(dzds, 1)
+                #dzds = np.expand_dims(dzds, 1)
+                #dzds = np.tile(dzds, (1,self.P,1,1))
+                #et_in = (dzds @ epst_in).reshape([self.H,self.P])
 
+                ## E-prop 1 for input connectivity.
+                #TODO: The tiling is highly inefficient, I'm sure we can figure out how to do it without it.
                 Dt = self.eprop_funcs['D'](self, st, st1)
+                Dts = np.expand_dims(Dt, 1)
+                Dts = np.tile(Dts, (1,self.P,1,1))
                 dsdt = self.eprop_funcs['d_st_d_tp'](self, st, xt1)
-                epst_in = Dt[:,np.newaxis,:,:] @ epst1_in + dsdt
+                epst_in = Dts @ epst1_in + dsdt
                 dzds = self.eprop_funcs['dzds'](self, st, zt)
-                et_in = (dzds[:,np.newaxis,np.newaxis,:] @ epst_in).reshape([self.H,self.P])
-                filt_et_in = self.net_params['kappa'] * filt_et_in + et_in
+                dzds = np.expand_dims(dzds, 1)
+                dzds = np.expand_dims(dzds, 1)
+                dzds = np.tile(dzds, (1,self.P,1,1))
+                et_in = (dzds @ epst_in).reshape([self.H,self.P])
+
+                filt_et_in = kappa * filt_et_in + et_in
                 
                 Lt = self.eprop_funcs['L'](self, yt, target[ti])
 
@@ -144,16 +164,21 @@ class NeuralNetwork(object):
                 gradt_in = np.diag(Lt) @ filt_et_in
                 self.grad_in += gradt_in
 
-
                 # E-prop 1 for Recurrent connectivity.
+                #TODO: The tiling is highly inefficient, I'm sure we can figure out how to do it without it.
                 Dt = self.eprop_funcs['D'](self, st, st1)
+                Dts = np.expand_dims(Dt, 1)
+                Dts = np.tile(Dts, (1,self.H,1,1))
                 #TODO: Make sure it is indeed st and not st1 in the next line.
                 dsdt = self.eprop_funcs['d_st_d_tp'](self, st, zt1)
-                epst = Dt[:,np.newaxis,:,:] @ epst1 + dsdt
+                epst = Dts @ epst1 + dsdt
                 dzds = self.eprop_funcs['dzds'](self, st, zt)
-                et = (dzds[:,np.newaxis,np.newaxis,:] @ epst).reshape([self.H,self.H])
+                dzds = np.expand_dims(dzds, 1)
+                dzds = np.expand_dims(dzds, 1)
+                dzds = np.tile(dzds, (1,self.H,1,1))
+                et = (dzds @ epst).reshape([self.H,self.H])
 
-                filt_et = self.net_params['kappa']* filt_et + et
+                filt_et = kappa * filt_et + et
                 
                 Lt = self.eprop_funcs['L'](self, yt, target[ti])
 
@@ -161,7 +186,6 @@ class NeuralNetwork(object):
                 #gradt_rec = filt_et * Lt
                 gradt_rec = np.diag(Lt) @ filt_et
                 self.grad_rec += gradt_rec
-
 
                 # Readout weights are easier.
                 assert self.Q == 1
@@ -223,30 +247,24 @@ class NeuralNetwork(object):
         return ret
 
 
-#class SpikingNeuralNetwork(NeuralNetwork):
-#    """
-#    Slightly more specific, will have weight initializers as well as the opportunity for additional parameters.
-#
-#    """
-#    pass
+class SpikingNeuralNetwork(NeuralNetwork):
+    """
+    Slightly more specific, will have weight initializers as well as the opportunity for additional parameters.
 
-#TODO: Should not have "R" argument. 
-class ALifNeuralNetwork(NeuralNetwork):
+    """
+    pass
+
+class ALifNeuralNetwork(SpikingNeuralNetwork):
     """
     Should be very quick to use and instantiate.
 
     """
     def __init__(self, R, H, P, Q, t_eps = 0.01, thresh = 1., \
             refractory_period = 0.05, tau_m = 0.02, tau_o = 0.02, \
-            tau_a = 2., betas = None, mb_size = 1,\
-            gamma = 0.3, optimizer = None, isig = [1.0,0.001,1.0], costfunc = None):
-        self.mb_size = mb_size
-        self.costfunc = costfunc
-
-        if betas is None:
-            betas = np.array([1 for i in range(H)])
+            tau_a = 2., betas = np.array([1 for i in range(H)]), \
+            gamma = 0.3, optimizer = None, isig = [1.0,0.001,1.0]):
         # Initialize weights and store model parameters
-        refractory_steps = int(np.ceil(refractory_period / t_eps))
+        self.refractory_steps = int(np.ceil(refractory_period / t_eps))
 
         THETA_in = np.zeros([H,P]) + np.random.normal(size=[H,P], scale = isig[0])
         THETA_rec = np.zeros([H,H]) + np.random.normal(size=[H,H], scale = isig[1])
@@ -256,39 +274,40 @@ class ALifNeuralNetwork(NeuralNetwork):
         kappa = np.exp(-t_eps/tau_o)
         rho = np.exp(-t_eps/tau_a)
 
-        net_params = {'thresh' : thresh, 'alpha' : alpha, 'kappa' : kappa, 'betas' : betas,  'rho' : rho,  't_eps' : t_eps, 'gamma' : gamma, 'spikes' : [], 'ref_steps' : refractory_steps, \
+        nn_params = {'thresh' : thresh, 'alpha' : alpha, 'kappa' : kappa, 'betas' : betas,  'rho' : rho,  't_eps' : t_eps, 'gamma' : gamma, 'spikes' : [], 'ref_steps' : refractory_steps, \
         'rc' : np.zeros(H).astype(np.int)}
 
         trainable_params = {'in' : THETA_in, 'rec' : THETA_rec, 'out' : THETA_out}
 
         # Define neural dynamics
-        if self.costfunc == crossentropy:
-            def dEdy(nn, yt, target_t):
+        sigmoid = lambda x: 1. / (1. + np.exp(-x))
+        def dEdy(nn, yt, target_t):
 
-                if np.isnan(target_t):
-                    return 0.
+            if np.isnan(target_t):
+                return 0.
 
-                prob = sigmoid(yt)
-                if target_t == 1:
-                    #return ((prob-1.) * nn.trainable_params['out']).flatten()
-                    return (prob-1.).flatten()
-                elif target_t == 0:
-                    #return (prob * nn.trainable_params['out']).flatten()
-                    return (prob).flatten()
-                else:
-                    raise AttributeError("for entropic loss, the target should be either None, 0, or 1. Instead, it was %s"%target_t)
-        elif self.costfunc == mse:
-            def dEdy(nn, yt, target_t):
-                if np.isnan(target_t):
-                    return 0.
-                return (yt - target_t).flatten()
-        else:
-            raise NotImplementedError("Gradients only available for mse and crossentropy, please change cost to one of these.")
+            prob = sigmoid(yt)
+            if target_t == 1:
+                #return ((prob-1.) * nn.trainable_params['out']).flatten()
+                return (prob-1.).flatten()
+            elif target_t == 0:
+                #return (prob * nn.trainable_params['out']).flatten()
+                return (prob).flatten()
+            else:
+                raise AttributeError("for entropic loss, the target should be either None, 0, or 1. Instead, it was %s"%target_t)
 
         def L(nn, yt, target_t):
             d = nn.eprop_funcs['dEdy'](nn, yt, target_t)
             return (d * nn.trainable_params['out']).flatten()
 
+        def crossentropy(logodds, label):
+            prob = sigmoid(logodds)
+            if label == 1:
+                return -np.log(prob)
+            elif label == 0:
+                return -np.log(1-prob)
+            else:
+                raise AttributeError("for entropic loss, the target should be either None, 0, or 1. Instead, it was %s"%label)
 
         # Give the jacobian of the state vector with respect to the trainable parameters.
         # TODO: Think harder about the timing for this: we have st1 here but st in lib.py
@@ -332,145 +351,77 @@ class ALifNeuralNetwork(NeuralNetwork):
 
         eprop_funcs = {'L' : L, 'd_st_d_tp' : d_st_d_tp, 'D' : D, 'dzds' : dzds, 'dEdy' : dEdy}
 
-        super(ALifNeuralNetwork, self).__init__(f=alif_f, g=alif_g, R=R, H=H, P=P, Q=Q, \
-                net_params = net_params, trainable_params = trainable_params, optimizer = optimizer, \
-                eprop_funcs = eprop_funcs, update_every = mb_size, costfunc = costfunc)
+        def f(nn, st):
+            betas = nn.net_params['betas']
+            thresh = nn.net_params['thresh']
+            zt = (st[0,:] - betas * st[1,:]) > thresh
+            our_spikes = list(np.where(zt)[0])
+            nn.net_params['spikes'].append(our_spikes)
+            return zt
 
+        def g(nn, st1, zt1, xt):
+            # Lower refractory counters (some may go strongly negative, but this shouldn't be a problem).
+            nn.net_params['rc'] -= 1
 
-    def run(self, t_steps, in_spikes, target = None, train = False, save_states = False, \
-            save_traces = False, in_params = None):
+            # Initialize at previous potential.
+            st = np.copy(st1)
 
-        if in_params is None:
-            def get_xt(self, ip, ti):
-                xt = np.zeros([self.P])
-                xt[ip['in_spikes'][ti]] = 1
-                return xt
+            # Reset neurons that spiked.
+            st *= (1-zt1)
 
-            in_params = {'in_spikes' : in_spikes, 'get_xt' : get_xt}
+            # Update refractory counter.
+            nn.net_params['rc'][zt1.astype(np.bool)] = nn.net_params['ref_steps']
 
-        #TODO: Betterrrr
-        self.net_params['spikes'] = []
-        ret = super(ALifNeuralNetwork, self).run(t_steps = t_steps, ip = in_params, target = target, train = train, save_states = save_states, save_traces = save_traces)
-        #ret = super().run(t_steps = t_steps, ip = in_params, target = target, train = train, save_states = save_states, save_traces = save_traces)
-        snn.reset_states()
+            # Decay Potential.
+            st[0,:] = alpha * st[0,:]
 
-        return ret
+            # Update adaptive excess threshold
+            st[1,:] = rho * st[1,:] + zt1
 
-def alif_f(nn, st):
-    betas = nn.net_params['betas']
-    thresh = nn.net_params['thresh']
-    zt = (st[0,:] - betas * st[1,:]) > thresh
-    our_spikes = list(np.where(zt)[0])
-    nn.net_params['spikes'].append(our_spikes)
-    return zt
+            # Integrate incoming spikes
+            #st += zt1 @ nn.trainable_params['rec'].T
+            st[0,:] += nn.trainable_params['rec'] @ zt1
 
-def alif_g(nn, st1, zt1, xt):
-    # Lower refractory counters (some may go strongly negative, but this shouldn't be a problem).
-    nn.net_params['rc'] -= 1
+            # Integrate external stimuli
+            st[0,:] += nn.trainable_params['in'] @ xt
 
-    # Initialize at previous potential.
-    st = np.copy(st1)
+            ## Ensure nonnegativity
+            #st *= st > 0
 
-    # Reset neurons that spiked.
-    st *= (1-zt1)
+            # Reset any neurons still in their refractory period.
+            isref = (nn.net_params['rc'] > 0)
+            st[0,:] *= (1. - isref)
 
-    # Update refractory counter.
-    nn.net_params['rc'][zt1.astype(np.bool)] = nn.net_params['ref_steps']
-
-    # Decay Potential.
-    st[0,:] = nn.net_params['alpha'] * st[0,:]
-
-    # Update adaptive excess threshold
-    st[1,:] = nn.net_params['rho'] * st[1,:] + zt1
-
-    # Integrate incoming spikes
-    #st += zt1 @ nn.trainable_params['rec'].T
-    st[0,:] += nn.trainable_params['rec'] @ zt1
-
-    # Integrate external stimuli
-    st[0,:] += nn.trainable_params['in'] @ xt
-
-    ## Ensure nonnegativity
-    #st *= st > 0
-
-    # Reset any neurons still in their refractory period.
-    isref = (nn.net_params['rc'] > 0)
-    st[0,:] *= (1. - isref)
-
-    return st
+            return st
 
 
 
-def plot_allinone(snn, ret, inlist, costs, path = "allinone.png"):
+def plot_allinone(y, inlist, hiddenlist, costs, path = "allinone.pdf"):
     """
     y is a matrix giving one output in each row over time (time is represented by columns)
     inlist a list of lists. Each sublist represents a "group" of input neurons, which will have the same color. Each sublist should contain np.arrays giving neuron firing times.
     inlist A list of arrays, giving the firing times of each neuron
     """
-    H = snn.H
-    P = snn.P
-    Q = snn.Q
-    mb_size = snn.mb_size
-
-    hiddenlist = [[] for _ in range(H)]
-    for t in range(t_steps):
-        for neur in snn.net_params['spikes'][t]:
-            hiddenlist[neur].append(t)
-
-    y = ret['y']
-    S = ret['S']
-
     fig = plt.figure(figsize=[8,8])
-    plt.subplots_adjust(hspace = 0.5)
 
-    plt.subplot(3,3,1)
-    plt.plot(S[0,:,:].T)
-    plt.title("Potential")
-
-    plt.subplot(3,3,2)
-    plt.plot(S[1,:,:].T)
-    plt.title("Adaptive Threshold")
-
-    plt.subplot(3,3,3)
-    n_plot = min([H*H,1000])
-    toplot = np.random.choice(H*H,n_plot,replace = False)
-    plt.plot(ret['EPS'][:,:,1,:].reshape([H*H,t_steps]).T[:,toplot])
-    plt.title("Slow Recurrent ET Component.")
-
-    plt.subplot(3,3,4)
-    n_plot = min([H*P,1000])
-    toplot = np.random.choice(H*P,n_plot,replace = False)
-    plt.plot(ret['EPS_in'][:,:,1,:].reshape([H*P,t_steps]).T[:,toplot])
-    plt.title("Slow Input ET Component.")
-
-    plt.subplot(3,3,5)
-    plt.plot(target)
-    plt.title("Target")
-
-    #plt.subplot(3,3,4)
-    #n_plot = min([H*H,1000])
-    #toplot = np.random.choice(H*H,n_plot,replace = False)
-    #plt.plot(ret['EPS'][:,:,0,:].reshape([H*H,t_steps]).T[:,toplot])
-    #plt.title("Fast Recurrent ET Component.")
-
-    #plt.subplot(3,3,6)
-    #n_plot = min([H*P,1000])
-    #toplot = np.random.choice(H*P,n_plot,replace = False)
-    #plt.plot(ret['EPS_in'][:,:,0,:].reshape([H*P,t_steps]).T[:,toplot])
-    #plt.title("Fast Input ET Component.")
+    plt.subplot(2,2,1)
+    plt.plot(y.T)
+    plt.title("Output")
 
     G = len(inlist)
     color = plt.cm.rainbow(np.linspace(0,1,G))
-    plt.subplot(3,3,6)
+    plt.subplot(2,2,2)
     nplotted = 0
+
     for g in range(G):
         for gi in range(len(inlist[g])):
             nplotted += 1
             plt.eventplot(inlist[g][gi], color=color[g], linelengths = 0.5, lineoffsets=nplotted)
+
     plt.title("Input Spikes")
 
     G = len(hiddenlist)
-    plt.subplot(3,3,7)
+    plt.subplot(2,2,3)
     nplotted = 0
 
     for g in range(G):
@@ -479,75 +430,9 @@ def plot_allinone(snn, ret, inlist, costs, path = "allinone.png"):
 
     plt.title("Hidden Spikes")
 
-    plt.subplot(3,3,8)
-    plt.plot(y.flatten())
-    plt.title("Output")
-
-    plt.subplot(3,3,9)
-    batch_costs = np.mean(costs.reshape(-1,mb_size), axis = 1)
-    if np.min(batch_costs) > 0:
-        plt.plot(np.log10(batch_costs))
-    else:
-        plt.plot(batch_costs)
-    plt.title("Costs")
+    plt.subplot(2,2,4)
+    plt.title("Cost:")
+    plt.plot(costs)
 
     plt.savefig(path)
     plt.close()
-
-#### E-prop 1 for input connectivity.
-###TODO: The tiling is highly inefficient, I'm sure we can figure out how to do it without it.
-##Dt = self.eprop_funcs['D'](self, st, st1)
-##Dts = np.expand_dims(Dt, 1)
-##Dts = np.tile(Dts, (1,self.P,1,1))
-##dsdt = self.eprop_funcs['d_st_d_tp'](self, st, xt1)
-##epst_in = Dts @ epst1_in + dsdt
-##dzds = self.eprop_funcs['dzds'](self, st, zt)
-##dzds = np.expand_dims(dzds, 1)
-##dzds = np.expand_dims(dzds, 1)
-##dzds = np.tile(dzds, (1,self.P,1,1))
-##et_in = (dzds @ epst_in).reshape([self.H,self.P])
-#
-### E-prop 1 for input connectivity.
-##TODO: The tiling is highly inefficient, I'm sure we can figure out how to do it without it.
-#Dt = self.eprop_funcs['D'](self, st, st1)
-#Dts = np.expand_dims(Dt, 1)
-#Dts = np.tile(Dts, (1,self.P,1,1))
-#dsdt = self.eprop_funcs['d_st_d_tp'](self, st, xt1)
-#epst_in = Dts @ epst1_in + dsdt
-#dzds = self.eprop_funcs['dzds'](self, st, zt)
-#dzds = np.expand_dims(dzds, 1)
-#dzds = np.expand_dims(dzds, 1)
-#dzds = np.tile(dzds, (1,self.P,1,1))
-#et_in = (dzds @ epst_in).reshape([self.H,self.P])
-#
-#filt_et_in = self.net_params['kappa'] * filt_et_in + et_in
-#
-#Lt = self.eprop_funcs['L'](self, yt, target[ti])
-#
-## The commented out line seems to be equivalent (and hence, more efficient), although less readable, as array multiplication with different dimensions is unintuitive.
-##gradt_in = filt_et_in * Lt
-#gradt_in = np.diag(Lt) @ filt_et_in
-#self.grad_in += gradt_in
-#
-## E-prop 1 for Recurrent connectivity.
-##TODO: The tiling is highly inefficient, I'm sure we can figure out how to do it without it.
-#Dt = self.eprop_funcs['D'](self, st, st1)
-#Dts = np.expand_dims(Dt, 1)
-#Dts = np.tile(Dts, (1,self.H,1,1))
-##TODO: Make sure it is indeed st and not st1 in the next line.
-#dsdt = self.eprop_funcs['d_st_d_tp'](self, st, zt1)
-#epst = Dts @ epst1 + dsdt
-#dzds = self.eprop_funcs['dzds'](self, st, zt)
-#dzds = np.expand_dims(dzds, 1)
-#dzds = np.expand_dims(dzds, 1)
-#dzds = np.tile(dzds, (1,self.H,1,1))
-#et = (dzds @ epst).reshape([self.H,self.H])
-#
-#filt_et = self.net_params['kappa']* filt_et + et
-#
-#Lt = self.eprop_funcs['L'](self, yt, target[ti])
-#
-## The commented out line seems to be equivalent (and hence, more efficient)
-##gradt_rec = filt_et * Lt
-#gradt_rec = np.diag(Lt) @ filt_et
-#self.grad_rec += gradt_rec

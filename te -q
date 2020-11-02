@@ -1,0 +1,92 @@
+Help on function eventplot in module matplotlib.pyplot:
+
+eevveennttpplloott(positions, orientation='horizontal', lineoffsets=1, linelengths=1, linewidths=None, colors=None, linestyles='solid', *, data=None, **kwargs)
+    Plot identical parallel lines at the given positions.
+    
+    *positions* should be a 1D or 2D array-like object, with each row
+    corresponding to a row or column of lines.
+    
+    This type of plot is commonly used in neuroscience for representing
+    neural events, where it is usually called a spike raster, dot raster,
+    or raster plot.
+    
+    However, it is useful in any situation where you wish to show the
+    timing or position of multiple sets of discrete events, such as the
+    arrival times of people to a business on each day of the month or the
+    date of hurricanes each year of the last century.
+    
+    Parameters
+    ----------
+    positions : 1D or 2D array-like object
+        Each value is an event. If *positions* is a 2D array-like, each
+        row corresponds to a row or a column of lines (depending on the
+        *orientation* parameter).
+    
+    orientation : {'horizontal', 'vertical'}, optional
+        Controls the direction of the event collections:
+    
+            - 'horizontal' : the lines are arranged horizontally in rows,
+              and are vertical.
+            - 'vertical' : the lines are arranged vertically in columns,
+              and are horizontal.
+    
+    lineoffsets : scalar or sequence of scalars, optional, default: 1
+        The offset of the center of the lines from the origin, in the
+        direction orthogonal to *orientation*.
+    
+    linelengths : scalar or sequence of scalars, optional, default: 1
+        The total height of the lines (i.e. the lines stretches from
+        ``lineoffset - linelength/2`` to ``lineoffset + linelength/2``).
+    
+    linewidths : scalar, scalar sequence or None, optional, default: None
+        The line width(s) of the event lines, in points. If it is None,
+        defaults to its rcParams setting.
+    
+    colors : color, sequence of colors or None, optional, default: None
+        The color(s) of the event lines. If it is None, defaults to its
+        rcParams setting.
+    
+    linestyles : str or tuple or a sequence of such values, optional
+        Default is 'solid'. Valid strings are ['solid', 'dashed',
+        'dashdot', 'dotted', '-', '--', '-.', ':']. Dash tuples
+        should be of the form::
+    
+            (offset, onoffseq),
+    
+        where *onoffseq* is an even length tuple of on and off ink
+        in points.
+    
+    **kwargs : optional
+        Other keyword arguments are line collection properties.  See
+        :class:`~matplotlib.collections.LineCollection` for a list of
+        the valid properties.
+    
+    Returns
+    -------
+    
+    list : A list of :class:`~.collections.EventCollection` objects.
+        Contains the :class:`~.collections.EventCollection` that
+        were added.
+    
+    Notes
+    -----
+    
+    For *linelengths*, *linewidths*, *colors*, and *linestyles*, if only
+    a single value is given, that value is applied to all lines.  If an
+    array-like is given, it must have the same length as *positions*, and
+    each value will be applied to the corresponding row of the array.
+    
+    Examples
+    --------
+    
+    .. plot:: gallery/lines_bars_and_markers/eventplot_demo.py
+    
+    .. note::
+        In addition to the above described arguments, this function can take a
+        **data** keyword argument. If such a **data** argument is given, the
+        following arguments are replaced by **data[<arg>]**:
+    
+        * All arguments with the following names: 'colors', 'linelengths', 'lineoffsets', 'linestyles', 'linewidths', 'positions'.
+    
+        Objects passed as **data** must support item access (``data[<arg>]``) and
+        membership test (``<arg> in data``).
