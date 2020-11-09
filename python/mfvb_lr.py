@@ -26,13 +26,14 @@ H = 50
 P = 4*neur_per_group
 Q = 1
 
-feed_align = True
+#feed_align = True
+feed_align = False
 prior_var = 1e0 * 1/H
 data_var = 1e-3
 #prior_var = 1e-5
 #V = 100
-#V = 50
-V = 5
+V = 50
+#V = 5
 #V = 1
 
 mb_size = 50
@@ -42,8 +43,8 @@ mb_size = 50
 learn_rate = 1e-3
 
 #epochs = 40000
-#epochs = 20000
-epochs = 2000
+epochs = 20000
+#epochs = 2000
 #epochs = 100
 
 #NOTE: Is 0.05 on classical implementation.
